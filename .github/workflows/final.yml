@@ -7,32 +7,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Apktool
+      - name: Install Apktool 2.9.3
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y apktool
+          sudo apt-get remove -y apktool || true
+          sudo apt-get install -y wget
+          wget -q https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/linux/apktool -O apktool
+          wget -q https://bitbucket.org/iBotPeaches/apktool/downloads/apktool_2.9.3.jar -O apktool.jar
+          chmod +x apktool
+          chmod +x apktool.jar
+          sudo mv apktool /usr/local/bin/apktool
+          sudo mv apktool.jar /usr/local/bin/apktool.jar
+          apktool --version
           java -version
           
       - name: Build Cheats APK
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Download using gh cli (this always works for 59MB APK)
           gh release download v0.1.8 -R codepdbh/nfsmwpc-recompiled -p "*arm64.apk" --clobber -O original.apk || curl -L -A "Mozilla/5.0" -o original.apk https://github.com/codepdbh/nfsmwpc-recompiled/releases/download/v0.1.8/NFS_MW_v0.1.8_arm64.apk
           
           echo "=== FILE SIZE ==="
           ls -lh original.apk
-          du -h original.apk
           
-          # Fail if still too small
           SIZE=$(stat -c%s original.apk)
           if [ $SIZE -lt 1000000 ]; then
-            echo "ERROR: File is only $SIZE bytes, not a real APK:"
+            echo "File too small: $SIZE"
             cat original.apk
             exit 1
           fi
           
-          echo "=== Decompiling ==="
+          echo "=== Decompiling with 2.9.3 ==="
           apktool d original.apk -o patched -f
           
           echo "=== Patch Manifest ==="
@@ -52,7 +57,7 @@ jobs:
           .method public onCreate()V
               .locals 3
               invoke-super {p0}, Landroid/app/Service;->onCreate()V
-              const-string v0, "MW Cheats Loaded - Tap MW button"
+              const-string v0, "MW Cheats Loaded"
               const/4 v1, 0x1
               invoke-static {p0, v0, v1}, Landroid/widget/Toast;->makeText(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;
               move-result-object v0
@@ -71,7 +76,7 @@ jobs:
           echo "Launcher: $LAUNCHER"
           sed -i '/invoke-super.*onCreate/a \    new-instance v0, Landroid/content/Intent;\n    const-class v1, Lcom/nfsmw/androidevolved/CheatOverlayService;\n    invoke-direct {v0, p0, v1}, Landroid/content/Intent;-><init>(Landroid/content/Context;Ljava/lang/Class;)V\n    invoke-virtual {p0, v0}, Lcom/nfsmw/androidevolved/LauncherActivity;->startService(Landroid/content/Intent;)Landroid/content/ComponentName;' "$LAUNCHER"
           
-          echo "=== Rebuild ==="
+          echo "=== Rebuild with 2.9.3 ==="
           apktool b patched -o unsigned.apk
           
           echo "=== Align & Sign ==="
