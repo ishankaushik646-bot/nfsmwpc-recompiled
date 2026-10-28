@@ -1,5 +1,6 @@
 name: MW Cheats Final
 on: workflow_dispatch
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -9,61 +10,80 @@ jobs:
       - name: Install Apktool
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y apktool zipalign apksigner
+          sudo apt-get install -y apktool
           java -version
           
       - name: Build Cheats APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl -L -o original.apk https://github.com/codepdbh/nfsmwpc-recompiled/releases/download/v0.1.7/NFS_MW_v0.1.7_arm64.apk
-          echo "Downloaded $(du -h original.apk)"
+          # Download using gh cli (this always works for 59MB APK)
+          gh release download v0.1.8 -R codepdbh/nfsmwpc-recompiled -p "*arm64.apk" --clobber -O original.apk || curl -L -A "Mozilla/5.0" -o original.apk https://github.com/codepdbh/nfsmwpc-recompiled/releases/download/v0.1.8/NFS_MW_v0.1.8_arm64.apk
           
+          echo "=== FILE SIZE ==="
+          ls -lh original.apk
+          du -h original.apk
+          
+          # Fail if still too small
+          SIZE=$(stat -c%s original.apk)
+          if [ $SIZE -lt 1000000 ]; then
+            echo "ERROR: File is only $SIZE bytes, not a real APK:"
+            cat original.apk
+            exit 1
+          fi
+          
+          echo "=== Decompiling ==="
           apktool d original.apk -o patched -f
           
-          # Add permission
+          echo "=== Patch Manifest ==="
           sed -i 's|</manifest>|    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />\n</manifest>|' patched/AndroidManifest.xml
-          
-          # Add service
           sed -i '/<activity/a \        <service android:name="com.nfsmw.androidevolved.CheatOverlayService" android:exported="false" />' patched/AndroidManifest.xml
           
-          # Create cheat service smali directly
+          echo "=== Create Cheat Service ==="
           mkdir -p patched/smali/com/nfsmw/androidevolved
           cat > patched/smali/com/nfsmw/androidevolved/CheatOverlayService.smali << 'SMALI'
           .class public Lcom/nfsmw/androidevolved/CheatOverlayService;
           .super Landroid/app/Service;
           .method public onBind(Landroid/content/Intent;)Landroid/os/IBinder;
+              .locals 1
               const/4 v0, 0x0
               return-object v0
           .end method
           .method public onCreate()V
-              .locals 5
+              .locals 3
               invoke-super {p0}, Landroid/app/Service;->onCreate()V
-              const-string v0, "MW Cheats"
+              const-string v0, "MW Cheats Loaded - Tap MW button"
               const/4 v1, 0x1
               invoke-static {p0, v0, v1}, Landroid/widget/Toast;->makeText(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;
               move-result-object v0
               invoke-virtual {v0}, Landroid/widget/Toast;->show()V
               return-void
           .end method
+          .method public onStartCommand(Landroid/content/Intent;II)I
+              .locals 1
+              const/4 v0, 0x1
+              return v0
+          .end method
           SMALI
           
-          # Inject startService into LauncherActivity
+          echo "=== Inject into Launcher ==="
           LAUNCHER=$(find patched -name "LauncherActivity.smali" | head -1)
           echo "Launcher: $LAUNCHER"
-          sed -i '/\.method.*onCreate/,/return-void/ {
-            /invoke-super.*onCreate/ a \
-                new-instance v0, Landroid/content/Intent;\n                const-class v1, Lcom/nfsmw/androidevolved/CheatOverlayService;\n                invoke-direct {v0, p0, v1}, Landroid/content/Intent;-><init>(Landroid/content/Context;Ljava/lang/Class;)V\n                invoke-virtual {p0, v0}, Lcom/nfsmw/androidevolved/LauncherActivity;->startService(Landroid/content/Intent;)Landroid/content/ComponentName;
-          }' "$LAUNCHER"
+          sed -i '/invoke-super.*onCreate/a \    new-instance v0, Landroid/content/Intent;\n    const-class v1, Lcom/nfsmw/androidevolved/CheatOverlayService;\n    invoke-direct {v0, p0, v1}, Landroid/content/Intent;-><init>(Landroid/content/Context;Ljava/lang/Class;)V\n    invoke-virtual {p0, v0}, Lcom/nfsmw/androidevolved/LauncherActivity;->startService(Landroid/content/Intent;)Landroid/content/ComponentName;' "$LAUNCHER"
           
+          echo "=== Rebuild ==="
           apktool b patched -o unsigned.apk
-          zipalign -f 4 unsigned.apk aligned.apk
           
-          # Create debug keystore and sign
+          echo "=== Align & Sign ==="
+          $ANDROID_HOME/build-tools/34.0.0/zipalign -f 4 unsigned.apk aligned.apk
           keytool -genkey -v -keystore debug.jks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -validity 10000 -dname "CN=Test" -noprompt
-          apksigner sign --ks debug.jks --ks-pass pass:android --key-pass pass:android --out mw-cheats-final.apk aligned.apk
+          $ANDROID_HOME/build-tools/34.0.0/apksigner sign --ks debug.jks --ks-pass pass:android --key-pass pass:android --out mw-cheats-final.apk aligned.apk
           
+          echo "=== DONE ==="
           ls -lh *.apk
           
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: MW-Cheats-APK-Final
           path: mw-cheats-final.apk
