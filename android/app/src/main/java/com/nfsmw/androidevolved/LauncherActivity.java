@@ -30,6 +30,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import android.content.Intent;
+import android.net.Uri;
+import android.provider.Settings;
 
 /**
  * Launcher in the style of the MW and Carbon ports: game files and JUGAR on the left, options on the
